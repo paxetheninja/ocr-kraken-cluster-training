@@ -98,15 +98,20 @@ Current per-job config and what we've observed (this is the optimisation target)
 | GPU | 1× `rtx6000bb` (Blackwell, ~97 GB) per array task | **~60 % util/card**, VRAM almost unused |
 | Model | CATMuS-Print Large, ~5.7 M params | tiny relative to the card → compute underfed |
 | Batch | `-B 16` | small; VRAM headroom is large |
-| Dataloader | `--workers 4 --threads 8` | suspected **IO-bound** |
-| Dataset | Kraken `binary` arrows on **NFS** (`/mnt/nfs/projects`, RDMA) | NFS read latency a likely factor |
+| Dataloader | `--workers 8 --threads 8` | feeds from RAM (see below) |
+| Dataset | Kraken `binary` arrows compiled to **`/dev/shm`** (tmpfs/RAM) | was NFS — moved to RAM |
 | Precision | default fp32 | Kraken logs: *"set `torch.set_float32_matmul_precision('medium'|'high')`"* → Tensor Cores not fully used |
 | Parallelism | one fold per GPU (array tasks), no intra-train DDP | — |
 
-Candidate levers to discuss (not yet applied):
-- **Larger batch** (VRAM is free) + **more dataloader workers** to feed the GPU.
-- **Stage arrows to node-local scratch** before training to cut NFS latency.
-- **`set_float32_matmul_precision('high')`** / mixed precision for Tensor Cores.
+**Applied (behaviour-neutral — identical results, just faster IO):**
+- **Arrows compiled into `/dev/shm`** (RAM; the node has 2.3 TB) → training reads
+  the dataset from RAM instead of per-batch over NFS. The per-task RAMDIR is
+  private, which also removes arrow-name races between concurrent grid jobs.
+- **`--workers 4 → 8`** for more parallel batch collation.
+
+**Candidate levers (these change results → only for new experiments, not mid-run):**
+- **Larger batch** (`-B 16 → 64+`; VRAM is almost free).
+- **`torch.set_float32_matmul_precision('high')`** / mixed precision for Tensor Cores.
 - Whether **2-GPU DDP** is even worth it for a 5.7 M-param model, vs. just
   packing more fold/array tasks per node.
 

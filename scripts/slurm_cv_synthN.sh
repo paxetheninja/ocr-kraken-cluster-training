@@ -57,23 +57,27 @@ Path(f'cv/synth_n{N}.txt').write_text("\n".join(sy), encoding='utf-8')
 print(f"synth available: {len(sy)} (target {N}) [{NSDIR}]")
 PY
 
-# 2) compile arrows. TAG-unique names (N_r_K) so concurrent grid jobs that share
-#    the same fold/N never write the same arrow file (was: cvN_*_$K -> race).
-ketos compile -f page -o cv/cvN_tr_real_$TAG.arrow $(cat cv/fold${K}_train.txt)
-ketos compile -f page -o cv/cvN_va_$TAG.arrow      $(cat cv/fold${K}_val.txt)
-ketos compile -f page -o cv/cvN_synth_$TAG.arrow   $(cat cv/synth_n${N}.txt)
+# 2) compile arrows into RAM-backed scratch (tmpfs): training reads from RAM, not
+#    per-batch over NFS (the IO bottleneck). The per-task RAMDIR is private, so it
+#    also removes any arrow-name collision between concurrent grid jobs. Neutral.
+RAMDIR=/dev/shm/$USER/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}
+mkdir -p "$RAMDIR" 2>/dev/null || RAMDIR=$(mktemp -d)
+trap 'rm -rf "$RAMDIR"' EXIT
+ketos compile -f page -o "$RAMDIR/tr_real.arrow" $(cat cv/fold${K}_train.txt)
+ketos compile -f page -o "$RAMDIR/va.arrow"      $(cat cv/fold${K}_val.txt)
+ketos compile -f page -o "$RAMDIR/synth.arrow"   $(cat cv/synth_n${N}.txt)
 
 # 3) manifest: REAL_REPEAT copies of the real fold + 1x synth
-: > cv/cvN_tr_$TAG.manifest
-for i in $(seq 1 "$REAL_REPEAT"); do echo cv/cvN_tr_real_$TAG.arrow >> cv/cvN_tr_$TAG.manifest; done
-echo cv/cvN_synth_$TAG.arrow >> cv/cvN_tr_$TAG.manifest
-echo cv/cvN_va_$TAG.arrow > cv/cvN_va_$TAG.manifest
+: > "$RAMDIR/tr.manifest"
+for i in $(seq 1 "$REAL_REPEAT"); do echo "$RAMDIR/tr_real.arrow" >> "$RAMDIR/tr.manifest"; done
+echo "$RAMDIR/synth.arrow" >> "$RAMDIR/tr.manifest"
+echo "$RAMDIR/va.arrow" > "$RAMDIR/va.manifest"
 
 # 4) train
 OUT=models/cvN_$TAG
 rm -rf "$OUT"
-ketos --workers 4 --threads 8 train -f binary \
-    -t cv/cvN_tr_$TAG.manifest -e cv/cvN_va_$TAG.manifest \
+ketos --workers 8 --threads 8 train -f binary \
+    -t "$RAMDIR/tr.manifest" -e "$RAMDIR/va.manifest" \
     -i "$BASE_MODEL" -o "$OUT" -B 16 --resize new \
     -q early --min-epochs 20 --lag 15 -N 300
 

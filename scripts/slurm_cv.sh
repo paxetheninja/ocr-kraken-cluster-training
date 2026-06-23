@@ -36,13 +36,18 @@ esac
 echo "strategy=$STRATEGY fold=$K base=$BASE"
 
 TAG=${STRATEGY}_$K
-ketos compile -f page -o cv/tr_$TAG.arrow $TRAIN_PAGES
-ketos compile -f page -o cv/va_$TAG.arrow $(cat cv/fold${K}_val.txt)
-echo cv/tr_$TAG.arrow > cv/tr_$TAG.manifest
-echo cv/va_$TAG.arrow > cv/va_$TAG.manifest
+# Compile into RAM-backed scratch (tmpfs): training then reads the dataset from
+# RAM instead of per-batch over NFS (the IO bottleneck). Behaviour-neutral.
+RAMDIR=/dev/shm/$USER/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}
+mkdir -p "$RAMDIR" 2>/dev/null || RAMDIR=$(mktemp -d)
+trap 'rm -rf "$RAMDIR"' EXIT
+ketos compile -f page -o "$RAMDIR/tr.arrow" $TRAIN_PAGES
+ketos compile -f page -o "$RAMDIR/va.arrow" $(cat cv/fold${K}_val.txt)
+echo "$RAMDIR/tr.arrow" > "$RAMDIR/tr.manifest"
+echo "$RAMDIR/va.arrow" > "$RAMDIR/va.manifest"
 
-ketos --workers 4 --threads 8 train -f binary \
-    -t cv/tr_$TAG.manifest -e cv/va_$TAG.manifest \
+ketos --workers 8 --threads 8 train -f binary \
+    -t "$RAMDIR/tr.manifest" -e "$RAMDIR/va.manifest" \
     -i "$BASE" -o models/cv_$TAG -B 16 --resize new \
     -q early --min-epochs 20 --lag 15 -N 300
 
