@@ -26,9 +26,15 @@ scripts/
   slurm_cv_synthN.sh       5-fold CV with N synth + real oversampling (REAL_REPEAT)
   slurm_pretrain_synth.sh  pretrain on synth -> export .mlmodel base for finetune
   rerun_after_gtfix.sh     orchestration: prep -> stock baseline -> submit the grid
+  slurm_synth_ablation.sh  single-split synth-quantity ablation (N synth)
+  slurm_synth_balance.sh   single-split synth + real-oversampling ablation
+  slurm_seg_ablation.sh    segmentation ablation (fixed real val, varying synth)
+  slurm_smoke_real.sh      quick smoke test on real data only
 data_prep/
   cv_folds.py              build group-CV folds (group = inscription / HD number)
   eval_baseline.py         zero-shot letter-CER of any model on a PAGE-XML list
+  bundle_for_cluster.py    assemble the portable bundle/ (paths from the research repo)
+  make_tarball.sh          pack bundle + scripts into one archive to ship
 synthetic/
   generate_synthetic.py    render synthetic stone images + PAGE XML from EDH texts
 ```
