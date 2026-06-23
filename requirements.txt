@@ -1,0 +1,5 @@
+# Canonical environment is created by scripts/setup_env.sh (creates ~/kraken-venv).
+# These are the direct dependencies; kraken pulls a CUDA-enabled torch/torchvision.
+kraken>=5.2          # HTR engine: ketos compile/train/test/segtrain (Lightning + PyTorch)
+pillow               # synthetic image rendering (generate_synthetic.py)
+numpy                # synthetic relief/surface/damage maths

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+kraken-venv/
+
+# Secrets
+.env
+
+# Data & training artifacts (live on the cluster / research repo, never committed here)
+bundle/
+images/
+page/
+page_nospace/
+page_dots/
+cv/
+models/
+logs/
+edh_logs/
+*.arrow
+*.mlmodel
+*.safetensors
+*.ckpt
+*.tar
+*.tar.gz
+*.zip
+*.jpg
+*.jpeg
+*.png
+edh_inscriptions.json
