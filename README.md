@@ -119,10 +119,22 @@ Current per-job config and what we've observed (this is the optimisation target)
   a 5.7 M-param model at `-B 16` finishes a batch in ms, then waits on per-step host
   overhead + per-epoch validation.
 
-**Real lever (changes results → needs LR re-tuning + CV re-validation):**
-- **Larger batch** `-B 16 → 64/128` to amortise the per-step overhead (VRAM is
-  nearly empty). This is the throughput knob — benchmark this next.
-- Secondary: validate less often (every N epochs), `set_float32_matmul_precision('high')`.
+**Real lever — larger batch** (`scripts/bench_batch.sh`, fixed-epoch sweep, time + util):
+
+| batch | time | util | vs B16 |
+|---|---|---|---|
+| 16  | 111 s | 65 % | 1.00× |
+| 32  |  82 s | 61 % | 1.35× |
+| **64** | **66 s** | 64 % | **1.68×** |
+| 128 |  69 s | 59 % | 1.61× |
+
+- **`-B 64` ≈ 1.68× faster** — overhead-bound confirmed; bigger batch = fewer steps
+  = less per-step overhead. **B=64 is the sweet spot**; **B=128 is slower** (variable
+  line-width padding waste).
+- **Util stays ~64% regardless of batch** → the remaining idle is **per-epoch
+  validation**, not the batch. To raise util, validate less often (separate lever).
+- Caveat: adopting `-B 64` for a *real* run needs **LR ×~4** (linear scaling) + a CV
+  re-check of CER. As a throughput result it's solid (1.68×).
 - 2-GPU DDP is unlikely to help a 5.7 M-param, overhead-bound model — packing more
   array tasks per node is the better throughput play.
 
