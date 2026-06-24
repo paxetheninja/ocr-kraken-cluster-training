@@ -98,22 +98,33 @@ Current per-job config and what we've observed (this is the optimisation target)
 | GPU | 1× `rtx6000bb` (Blackwell, ~97 GB) per array task | **~60 % util/card**, VRAM almost unused |
 | Model | CATMuS-Print Large, ~5.7 M params | tiny relative to the card → compute underfed |
 | Batch | `-B 16` | small; VRAM headroom is large |
-| Dataloader | `--workers 8 --threads 8` | feeds from RAM (see below) |
-| Dataset | Kraken `binary` arrows compiled to **`/dev/shm`** (tmpfs/RAM) | was NFS — moved to RAM |
+| Dataloader | `--workers 4 --threads 8` | not the bottleneck (benchmarked) |
+| Dataset | Kraken `binary` arrows on NFS (page-cached in RAM) | not the bottleneck (benchmarked) |
 | Precision | default fp32 | Kraken logs: *"set `torch.set_float32_matmul_precision('medium'|'high')`"* → Tensor Cores not fully used |
 | Parallelism | one fold per GPU (array tasks), no intra-train DDP | — |
 
-**Applied (behaviour-neutral — identical results, just faster IO):**
-- **Arrows compiled into `/dev/shm`** (RAM; the node has 2.3 TB) → training reads
-  the dataset from RAM instead of per-batch over NFS. The per-task RAMDIR is
-  private, which also removes arrow-name races between concurrent grid jobs.
-- **`--workers 4 → 8`** for more parallel batch collation.
+**Benchmarked** (`scripts/bench_io.sh` — fixed-epoch A/B/C on identical data, util sampled per phase):
 
-**Candidate levers (these change results → only for new experiments, not mid-run):**
-- **Larger batch** (`-B 16 → 64+`; VRAM is almost free).
-- **`torch.set_float32_matmul_precision('high')`** / mixed precision for Tensor Cores.
-- Whether **2-GPU DDP** is even worth it for a 5.7 M-param model, vs. just
-  packing more fold/array tasks per node.
+| config | time | util |
+|---|---|---|
+| A  NFS arrow, workers 4 | 657 s | ~67 % |
+| B  RAM arrow, workers 4 | 657 s | ~67 % |
+| C  RAM arrow, workers 8 | 673 s | ~65 % |
+
+- **RAM-staging the arrows = 0 %** (A == B to the second). The <1 GB arrow is
+  already in the OS page cache (node has 2.3 TB RAM), so `/dev/shm` is the *same*
+  RAM. Reverted.
+- **More dataloader workers (4→8) = −2 %.** Not dataloader-bound. Reverted.
+- Util is stuck at ~67 % regardless → the job is **overhead-bound, not IO-bound**:
+  a 5.7 M-param model at `-B 16` finishes a batch in ms, then waits on per-step host
+  overhead + per-epoch validation.
+
+**Real lever (changes results → needs LR re-tuning + CV re-validation):**
+- **Larger batch** `-B 16 → 64/128` to amortise the per-step overhead (VRAM is
+  nearly empty). This is the throughput knob — benchmark this next.
+- Secondary: validate less often (every N epochs), `set_float32_matmul_precision('high')`.
+- 2-GPU DDP is unlikely to help a 5.7 M-param, overhead-bound model — packing more
+  array tasks per node is the better throughput play.
 
 ## Result context (so the numbers mean something)
 

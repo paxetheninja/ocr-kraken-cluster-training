@@ -50,19 +50,16 @@ Path(f'cv/pre_va_N{N}.list').write_text("\n".join(sy[:nval]), encoding='utf-8')
 print(f"pretrain synth N={N}: train={len(sy)-nval} val={nval} [{NSDIR}]")
 PY
 
-# 2) compile arrows into RAM-backed scratch (tmpfs) -> training reads from RAM, not NFS
-RAMDIR=/dev/shm/$USER/${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID:-0}
-mkdir -p "$RAMDIR" 2>/dev/null || RAMDIR=$(mktemp -d)
-trap 'rm -rf "$RAMDIR"' EXIT
-ketos compile -f page -o "$RAMDIR/pre_tr.arrow" $(cat cv/pre_tr_N${N}.list)
-ketos compile -f page -o "$RAMDIR/pre_va.arrow" $(cat cv/pre_va_N${N}.list)
-echo "$RAMDIR/pre_tr.arrow" > "$RAMDIR/pre_tr.manifest"
-echo "$RAMDIR/pre_va.arrow" > "$RAMDIR/pre_va.manifest"
+# 2) compile arrows (NFS; RAM-staging benchmarked as 0% -> reverted)
+ketos compile -f page -o cv/pre_tr_N${N}.arrow $(cat cv/pre_tr_N${N}.list)
+ketos compile -f page -o cv/pre_va_N${N}.arrow $(cat cv/pre_va_N${N}.list)
+echo cv/pre_tr_N${N}.arrow > cv/pre_tr_N${N}.manifest
+echo cv/pre_va_N${N}.arrow > cv/pre_va_N${N}.manifest
 
 # 3) pretrain CATMuS-Print Large on synth only
 rm -rf "$OUT"
-ketos --workers 8 --threads 8 train -f binary \
-    -t "$RAMDIR/pre_tr.manifest" -e "$RAMDIR/pre_va.manifest" \
+ketos --workers 16 --threads 8 train -f binary \
+    -t cv/pre_tr_N${N}.manifest -e cv/pre_va_N${N}.manifest \
     -i "$BASE_MODEL" -o "$OUT" -B 16 --resize new \
     -q early --min-epochs 15 --lag 10 -N 100
 
